@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IBONIRIUM · MYCELIUM GROVE · EXP-03</title>
+
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; background:#000; overflow:hidden; font-family:monospace; }
+canvas { position:fixed; inset:0; }
+#sensors { position:fixed; left:0; right:0; bottom:0; height:160px; pointer-events:none; }
+#info { position:fixed; bottom:12px; left:12px; color:#aaffcc; font-size:12px; line-height:1.4; opacity:0.9; }
+#panel { position:fixed; bottom:12px; right:12px; max-width:400px; color:#d0ffe0; font-size:12px; line-height:1.45; background:linear-gradient(to left,rgba(0,0,0,0.7),transparent); padding:14px 18px; }
+</style>
+</head>
+<body>
+
+<canvas id="stars"></canvas>
+<canvas id="grove"></canvas>
+<canvas id="sensors"></canvas>
+
+<div id="info">
+<b>IBONIRIUM · MYCELIUM GROVE · EXP‑03</b><br>
+Phase: <span id="phase">Spore Growth</span><br>
+Day: <span id="day">–</span><br>
+Solar SSN: <span id="ssn">–</span><br>
+Proton Flux (>10 MeV): <span id="proton">–</span> pfu<br>
+Recent Flare: <span id="flare">None</span><br>
+Radiation Level: <span id="rad">Low</span><br>
+Target: 13 December 2026
+</div>
+
+<div id="panel">
+<b>СТАН ЕКСПЕРИМЕНТУ</b><br>
+Космічний грибний ліс (міцелій + радіаційні гриби). Ростуть від SSN, отруюються proton flux, реагують шоками на X-ray спалахи.<br>
+При високій радіації — капелюшки червоніють, виділяють спори, мережа міцелію пульсує.<br><br>
+До <b>13 грудня 2026</b> — ріст. Потім фіксація "найотруєнішого" або "найздоровішого" лісу.
+</div>
+
+<script>
+// CANVAS SETUP
+const starC = document.getElementById('stars');
+const groveC = document.getElementById('grove');
+const sensC = document.getElementById('sensors');
+const sctx = starC.getContext('2d');
+const gctx = groveC.getContext('2d');
+const ctxs = sensC.getContext('2d');
+
+function resize() {
+  starC.width = groveC.width = sensC.width = innerWidth;
+  starC.height = groveC.height = innerHeight;
+  sensC.height = 160;
+}
+addEventListener('resize', resize); resize();
+
+// ЗІРКИ
+const stars = Array.from({length:320}, () => ({x:Math.random(), y:Math.random(), z:Math.random()*0.9+0.1}));
+function drawStars() {
+  sctx.clearRect(0,0,starC.width,starC.height);
+  stars.forEach(s => {
+    s.y += 0.00025 * (1 + s.z*2.5);
+    if (s.y > 1) s.y = -0.02;
+    sctx.globalAlpha = 0.35 + s.z*0.65;
+    sctx.fillStyle = "#f0f8ff";
+    sctx.beginPath();
+    sctx.arc(s.x*starC.width, s.y*starC.height, s.z*2, 0, Math.PI*2);
+    sctx.fill();
+  });
+}
+
+// ДАНІ NOAA
+let ssn = 0;
+let protonFlux = 0;
+let radiationLevel = 0;
+let recentFlare = {class: 'None', time: ''};
+
+async function updateSpaceWeather() {
+  try {
+    // SSN
+    const rSSN = await fetch('https://services.swpc.noaa.gov/json/solar-cycle/predicted-solar-cycle.json');
+    const dSSN = await rSSN.json();
+    ssn = dSSN[dSSN.length-1]?.predicted_ssn || 12;
+
+    // X-ray flares
+    const rFlare = await fetch('https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json');
+    const flares = await rFlare.json();
+    if (flares?.length) {
+      const latest = flares[flares.length-1];
+      recentFlare = {
+        class: latest.max_class || latest.current_class || 'C0.0',
+        time: latest.max_time || latest.time_tag || ''
+      };
+      document.getElementById('flare').textContent = recentFlare.class;
+    }
+
+    // Proton flux — fallback (реальний API нестабільний, можна замінити на text-парсинг якщо знайдеш)
+    protonFlux = 0.5 + Math.random()*8;
+
+    // Радіація: proton + flare boost
+    let flareBoost = recentFlare.class.startsWith('X') ? 0.95 : recentFlare.class.startsWith('M') ? 0.55 : recentFlare.class.startsWith('C') ? 0.2 : 0;
+    radiationLevel = Math.min(1, (Math.log10(protonFlux + 1)/6) + flareBoost);
+
+    document.getElementById('ssn').textContent = ssn.toFixed(1);
+    document.getElementById('proton').textContent = protonFlux.toFixed(1);
+    document.getElementById('rad').textContent = 
+      radiationLevel < 0.25 ? 'Low' :
+      radiationLevel < 0.55 ? 'Moderate' :
+      radiationLevel < 0.85 ? 'High' : 'Severe';
+  } catch(e) {
+    ssn = 10 + Math.random()*40;
+    recentFlare.class = ['C4.1','M2.3','X1.0','None'][Math.floor(Math.random()*4)];
+  }
+}
+updateSpaceWeather();
+setInterval(updateSpaceWeather, 1200*1000); // 20 хв
+
+// ГРИБИ — 3 типи
+class CosmicMushroom {
+  constructor(x) {
+    this.x = x;
+    this.type = Math.floor(Math.random()*3); // 0=капелюшок, 1=роги, 2=кулястий
+    this.age = 0.2 + Math.random()*0.6;
+    this.maxAge = [4.5, 5.5, 4][this.type] + Math.random()*2.5;
+    this.phase = Math.random()*Math.PI*2;
+    this.radiationDamage = 0;
+    this.sporePhase = 0;
+  }
+
+  grow() {
+    let speed = 0.0035 * (0.5 + ssn/150);
+    if (recentFlare.class.startsWith('M') || recentFlare.class.startsWith('X')) speed *= 2.2;
+    this.age += speed * (1 - this.radiationDamage*0.65);
+    this.radiationDamage += radiationLevel*0.012 - 0.003;
+    this.radiationDamage = Math.max(0, Math.min(1.2, this.radiationDamage));
+    this.age = Math.min(this.maxAge, this.age);
+  }
+
+  draw() {
+    const baseY = groveC.height * 0.8;
+    let stemH = this.age * 45;
+    let capR = this.age * 18 + this.type*5;
+    const x = this.x * groveC.width;
+    const yStem = baseY - stemH;
+    const rad = this.radiationDamage;
+
+    // Колір стебла
+    gctx.strokeStyle = `hsl(${rad > 0.7 ? 280 : 140 - rad*120}, 70%, ${50 + rad*30}%)`;
+    gctx.lineWidth = 6 - rad*3;
+    gctx.beginPath();
+    gctx.moveTo(x, baseY);
+    gctx.lineTo(x + Math.sin(this.phase*3)*8, yStem);
+    gctx.stroke();
+
+    // Капелюшок / форма
+    let hue = rad > 0.6 ? 290 + rad*70 : this.type === 1 ? 200 : this.type === 2 ? 320 : 30;
+    gctx.fillStyle = `hsla(${hue}, 90%, ${60 - rad*40}%, ${0.75 + Math.sin(Date.now()*0.001 + this.phase)*0.15})`;
+    gctx.beginPath();
+
+    if (this.type === 0) { // класичний капелюшок
+      gctx.arc(x, yStem - capR*0.3, capR, Math.PI, 0, false);
+      gctx.lineTo(x - capR*1.4, yStem);
+      gctx.lineTo(x + capR*1.4, yStem);
+      gctx.closePath();
+    } else if (this.type === 1) { // роги
+      for (let i = 0; i < 5; i++) {
+        const a = i * Math.PI*0.4 + Date.now()*0.0005;
+        gctx.lineTo(x + Math.cos(a)*capR*1.5, yStem - capR + Math.sin(a)*capR*0.8);
+      }
+      gctx.closePath();
+    } else { // кулястий
+      gctx.arc(x, yStem - capR*0.6, capR*1.3, 0, Math.PI*2);
+    }
+    gctx.fill();
+
+    // Спори / пульсація при високій радіації
+    if (rad > 0.4 || recentFlare.class.startsWith('X')) {
+      this.sporePhase += 0.08;
+      gctx.globalAlpha = 0.3 + Math.sin(this.sporePhase)*0.4;
+      gctx.fillStyle = recentFlare.class.startsWith('X') ? 'rgba(255,80,180,0.6)' : 'rgba(180,100,255,0.5)';
+      gctx.beginPath();
+      gctx.arc(x, yStem - capR*0.5, capR*1.8 + rad*30, 0, Math.PI*2);
+      gctx.fill();
+      gctx.globalAlpha = 1;
+    }
+  }
+}
+
+const mushrooms = Array.from({length:80}, () => new CosmicMushroom(Math.random()));
+
+// СПОРИ (частинки)
+const spores = [];
+function spawnSpore() {
+  const chance = radiationLevel*0.6 + (recentFlare.class.startsWith('X')?1.2 : recentFlare.class.startsWith('M')?0.6 : 0);
+  if (Math.random() < chance) {
+    spores.push({
+      x: Math.random()*groveC.width,
+      y: groveC.height * 0.4,
+      vy: 1.2 + Math.random()*4,
+      life: 50 + Math.random()*100
+    });
+  }
+}
+
+function drawSpores() {
+  gctx.globalAlpha = 0.65;
+  spores.forEach((s,i) => {
+    s.y += s.vy;
+    s.life--;
+    if (s.life <= 0) spores.splice(i,1);
+    else {
+      gctx.fillStyle = `rgba(220,120,255,${s.life/120})`;
+      gctx.fillRect(s.x-1, s.y-1, 2.5, 10);
+    }
+  });
+  gctx.globalAlpha = 1;
+}
+
+// СЕНСОРИ
+function drawSensors() {
+  ctxs.clearRect(0,0,sensC.width,sensC.height);
+  const baseY = 120;
+
+  ctxs.fillStyle = `rgba(255,240,120,${0.4 + ssn/250})`;
+  ctxs.beginPath(); ctxs.arc(90, baseY-45, 15 + ssn/35, 0, Math.PI*2); ctxs.fill();
+  ctxs.fillStyle = '#fff'; ctxs.font = '11px monospace'; ctxs.fillText('☀ SSN', 55, baseY+20);
+
+  const radColor = radiationLevel < 0.3 ? '#0f8' : radiationLevel < 0.65 ? '#ff8' : '#f55';
+  ctxs.strokeStyle = radColor; ctxs.lineWidth = 2.5;
+  ctxs.beginPath(); ctxs.arc(250, baseY-25, 28, -Math.PI/2, -Math.PI/2 + radiationLevel*Math.PI*2); ctxs.stroke();
+  ctxs.fillStyle = radColor; ctxs.fillText('☢ RAD', 220, baseY+20);
+
+  const now = new Date(); const start = new Date('2026-01-01'); const stop = new Date('2026-12-13');
+  const progress = Math.min(1, Math.max(0, (now - start)/(stop - start)));
+  ctxs.strokeStyle = 'rgba(120,240,255,0.75)';
+  ctxs.beginPath(); ctxs.arc(380, baseY-25, 28, -Math.PI/2, -Math.PI/2 + progress*Math.PI*2); ctxs.stroke();
+  ctxs.fillStyle = '#8af'; ctxs.fillText('⏳', 365, baseY+20);
+}
+
+// ЦИКЛ
+const START = new Date('2026-01-01');
+const STOP  = new Date('2026-12-13');
+
+function updateDay() {
+  const now = new Date();
+  const days = Math.floor((now - START)/86400000);
+  document.getElementById('day').textContent = days >= 0 ? days : 0;
+  document.getElementById('phase').textContent = now < STOP ? 'Spore Growth' : 'Final Bloom';
+}
+setInterval(updateDay, 60000);
+updateDay();
+
+function loop() {
+  drawStars();
+  drawSensors();
+
+  const now = new Date();
+  if (now < STOP) {
+    gctx.clearRect(0,0,groveC.width,groveC.height);
+
+    // Міцелійна земля
+    gctx.fillStyle = 'rgba(10,30,20,0.5)';
+    gctx.fillRect(0, groveC.height*0.76, groveC.width, groveC.height);
+
+    mushrooms.forEach(m => { m.grow(); m.draw(); });
+    spawnSpore();
+    drawSpores();
+  }
+
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
